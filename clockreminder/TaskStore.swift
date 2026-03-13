@@ -106,13 +106,6 @@ final class TaskStore: ObservableObject {
         refreshTodayTasks()
     }
 
-    func deleteTodayTask(id: UUID) {
-        guard let index = todayTasks.firstIndex(where: { $0.id == id }) else {
-            return
-        }
-        deleteTodayTasks(at: IndexSet(integer: index))
-    }
-
     func updateTodayTask(_ task: TodayTask) {
         guard let idx = todayTasks.firstIndex(where: { $0.id == task.id }) else {
             return
@@ -139,6 +132,7 @@ final class TaskStore: ObservableObject {
         dailyTasks.append(task)
         saveDailyTasks()
         refreshDailyTasks()
+        applyDailyChangesToTodayForCurrentDate()
     }
 
     func updateDailyTask(_ task: DailyTask) {
@@ -150,37 +144,14 @@ final class TaskStore: ObservableObject {
         dailyTasks[idx] = updated
         saveDailyTasks()
         refreshDailyTasks()
+        applyDailyChangesToTodayForCurrentDate()
     }
 
     func deleteDailyTasks(at offsets: IndexSet) {
-        let dailyIDs = offsets.compactMap { index in
-            dailyTasks.indices.contains(index) ? dailyTasks[index].id : nil
-        }
         dailyTasks.remove(atOffsets: offsets)
         saveDailyTasks()
         refreshDailyTasks()
-
-        let toRemove = todayTasks.filter { task in
-            guard let sourceID = task.sourceDailyTaskID else { return false }
-            return dailyIDs.contains(sourceID)
-        }
-        for task in toRemove {
-            NotificationManager.shared.removeNotification(id: task.notificationID)
-        }
-        todayTasks.removeAll { task in
-            guard let sourceID = task.sourceDailyTaskID else { return false }
-            return dailyIDs.contains(sourceID)
-        }
-        saveTodayTasks()
-        refreshTodayTasks()
-        scheduleDailySummaryReminderIfNeeded()
-    }
-
-    func deleteDailyTask(id: UUID) {
-        guard let index = dailyTasks.firstIndex(where: { $0.id == id }) else {
-            return
-        }
-        deleteDailyTasks(at: IndexSet(integer: index))
+        applyDailyChangesToTodayForCurrentDate()
     }
 
     func setDailySummaryReminderTime(_ time: TimeOfDay?) {
@@ -196,7 +167,7 @@ final class TaskStore: ObservableObject {
     }
 
     private func scheduleNotification(for task: TodayTask) {
-        guard task.type == .clock, !task.isDone, let remindTime = task.remindTime else {
+        guard !task.isDone, let remindTime = task.remindTime else {
             NotificationManager.shared.removeNotification(id: task.notificationID)
             return
         }
@@ -204,7 +175,7 @@ final class TaskStore: ObservableObject {
         NotificationManager.shared.scheduleNotification(
             id: task.notificationID,
             title: task.title,
-            body: "Clock task reminder",
+            body: "It's time to \(task.title)",
             at: date
         )
     }
@@ -350,6 +321,80 @@ final class TaskStore: ObservableObject {
             return nil
         }
         return filtered
+    }
+
+    private func applyDailyChangesToTodayForCurrentDate() {
+        let today = Date().yyyyMMdd
+        let lastSyncDate = UserDefaults.standard.string(forKey: lastDailySyncDateKey)
+        if lastSyncDate != today {
+            syncTodayTasksForCurrentDateIfNeeded()
+            return
+        }
+
+        let weekday = Date().weekdayIndex
+        let tempTasks = todayTasks.filter { $0.sourceDailyTaskID == nil && $0.dateString == today }
+        let existingDailyTasks = todayTasks.filter { $0.sourceDailyTaskID != nil && $0.dateString == today }
+        var existingBySourceID: [UUID: TodayTask] = [:]
+        var existingByTitle: [String: [TodayTask]] = [:]
+        for task in existingDailyTasks {
+            if let sourceID = task.sourceDailyTaskID {
+                existingBySourceID[sourceID] = task
+            }
+            let key = normalizedTitle(task.title)
+            existingByTitle[key, default: []].append(task)
+        }
+        var usedTaskIDs = Set<UUID>()
+
+        let rebuiltDailyTasks: [TodayTask] = dailyTasks
+            .filter { $0.isActive && $0.runs(on: weekday) }
+            .map { daily in
+                if let old = existingBySourceID[daily.id] {
+                    usedTaskIDs.insert(old.id)
+                    return mergedTodayTask(from: old, with: daily, today: today)
+                }
+
+                let titleKey = normalizedTitle(daily.title)
+                if let matched = existingByTitle[titleKey]?.first(where: { !usedTaskIDs.contains($0.id) }) {
+                    usedTaskIDs.insert(matched.id)
+                    return mergedTodayTask(from: matched, with: daily, today: today)
+                }
+
+                return TodayTask(
+                    dateString: today,
+                    sourceDailyTaskID: daily.id,
+                    title: daily.title,
+                    type: daily.type,
+                    remindTime: daily.defaultTime,
+                    clockURL: daily.clockURL
+                )
+            }
+
+        let dedupedTemps = dedupeCarriedTasks(tempTasks, against: rebuiltDailyTasks)
+
+        for task in todayTasks where task.dateString == today {
+            NotificationManager.shared.removeNotification(id: task.notificationID)
+        }
+        todayTasks = rebuiltDailyTasks + dedupedTemps
+        scheduleAllTodayNotifications()
+        scheduleDailySummaryReminderIfNeeded()
+        saveTodayTasks()
+        refreshTodayTasks()
+    }
+
+    private func mergedTodayTask(from old: TodayTask, with daily: DailyTask, today: String) -> TodayTask {
+        TodayTask(
+            id: old.id,
+            dateString: today,
+            sourceDailyTaskID: daily.id,
+            title: daily.title,
+            type: daily.type,
+            remindTime: daily.defaultTime,
+            clockURL: daily.clockURL,
+            isDone: old.isDone,
+            notificationID: old.notificationID,
+            originalDateString: old.originalDateString,
+            carryOverDays: old.carryOverDays
+        )
     }
 
     private static func defaultDailyTasks() -> [DailyTask] {

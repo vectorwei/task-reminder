@@ -234,23 +234,10 @@ struct ContentView: View {
         store.deleteDailyTasks(at: offsets)
     }
 
-    private func deleteTodayTask(_ id: UUID) {
-        if expandedTodayTaskID == id {
-            expandedTodayTaskID = nil
-        }
-        store.deleteTodayTask(id: id)
-    }
-
-    private func deleteDailyTask(_ id: UUID) {
-        if expandedDailyTaskID == id {
-            expandedDailyTaskID = nil
-        }
-        store.deleteDailyTask(id: id)
-    }
 }
 
 private struct DailyTaskRow: View {
-    @State var task: DailyTask
+    let task: DailyTask
     let isExpanded: Bool
     let onToggleExpand: () -> Void
     let onChanged: (DailyTask) -> Void
@@ -281,8 +268,9 @@ private struct DailyTaskRow: View {
                     text: Binding(
                         get: { task.title },
                         set: {
-                            task.title = $0
-                            onChanged(task)
+                            var updated = task
+                            updated.title = $0
+                            onChanged(updated)
                         }
                     )
                 )
@@ -293,8 +281,9 @@ private struct DailyTaskRow: View {
                     isOn: Binding(
                         get: { task.isActive },
                         set: {
-                            task.isActive = $0
-                            onChanged(task)
+                            var updated = task
+                            updated.isActive = $0
+                            onChanged(updated)
                         }
                     )
                 )
@@ -304,8 +293,9 @@ private struct DailyTaskRow: View {
                     isOn: Binding(
                         get: { task.defaultTime != nil },
                         set: { isOn in
-                            task.defaultTime = isOn ? (task.defaultTime ?? TimeOfDay(date: Date())) : nil
-                            onChanged(task)
+                            var updated = task
+                            updated.defaultTime = isOn ? (task.defaultTime ?? TimeOfDay(date: Date())) : nil
+                            onChanged(updated)
                         }
                     )
                 )
@@ -315,9 +305,10 @@ private struct DailyTaskRow: View {
                     selectedDays: Binding(
                         get: { Set(task.activeWeekdays ?? WeekdayOption.allCases.map(\.rawValue)) },
                         set: { selected in
+                            var updated = task
                             let normalized = selected.count == 7 ? nil : Array(selected).sorted()
-                            task.activeWeekdays = normalized
-                            onChanged(task)
+                            updated.activeWeekdays = normalized
+                            onChanged(updated)
                         }
                     )
                 )
@@ -328,8 +319,9 @@ private struct DailyTaskRow: View {
                         selection: Binding(
                             get: { (task.defaultTime ?? TimeOfDay(date: Date())).toDate() },
                             set: {
-                                task.defaultTime = TimeOfDay(date: $0)
-                                onChanged(task)
+                                var updated = task
+                                updated.defaultTime = TimeOfDay(date: $0)
+                                onChanged(updated)
                             }
                         ),
                         displayedComponents: .hourAndMinute
@@ -342,8 +334,9 @@ private struct DailyTaskRow: View {
                         text: Binding(
                             get: { task.clockURL ?? "" },
                             set: {
-                                task.clockURL = $0
-                                onChanged(task)
+                                var updated = task
+                                updated.clockURL = $0
+                                onChanged(updated)
                             }
                         )
                     )
@@ -359,7 +352,7 @@ private struct DailyTaskRow: View {
 }
 
 private struct TodayTaskRow: View {
-    @State var task: TodayTask
+    let task: TodayTask
     let isExpanded: Bool
     let onToggleExpand: () -> Void
     let onChanged: (TodayTask) -> Void
@@ -368,8 +361,9 @@ private struct TodayTaskRow: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Button {
-                    task.isDone.toggle()
-                    onChanged(task)
+                    var updated = task
+                    updated.isDone.toggle()
+                    onChanged(updated)
                 } label: {
                     Image(systemName: task.isDone ? "checkmark.circle.fill" : "circle")
                         .font(.title3)
@@ -404,8 +398,9 @@ private struct TodayTaskRow: View {
                     isOn: Binding(
                         get: { task.remindTime != nil },
                         set: { isOn in
-                            task.remindTime = isOn ? (task.remindTime ?? TimeOfDay(date: Date())) : nil
-                            onChanged(task)
+                            var updated = task
+                            updated.remindTime = isOn ? (task.remindTime ?? TimeOfDay(date: Date())) : nil
+                            onChanged(updated)
                         }
                     )
                 )
@@ -417,8 +412,9 @@ private struct TodayTaskRow: View {
                         selection: Binding(
                             get: { (task.remindTime ?? TimeOfDay(date: Date())).toDate() },
                             set: {
-                                task.remindTime = TimeOfDay(date: $0)
-                                onChanged(task)
+                                var updated = task
+                                updated.remindTime = TimeOfDay(date: $0)
+                                onChanged(updated)
                             }
                         ),
                         displayedComponents: .hourAndMinute
